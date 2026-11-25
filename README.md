@@ -1,35 +1,157 @@
-# Employee Attrition Prediction Models
+# Employee Attrition Prediction & Workforce Risk Analysis
 
-IBM HR Analytics assignment: predict employee attrition (classification) and, as the optional business task,
-predict job satisfaction (regression).
+An end-to-end machine learning workflow built around the **IBM HR Analytics Employee Attrition & Performance** schema. The project pairs a binary attrition classification pipeline with an exploratory regression study on job satisfaction, automated visualization generation, and programmatic `.docx` reporting for technical and HR stakeholders.
 
-## What is inside
-| Path | Purpose |
-|---|---|
-| `notebooks/employee_attrition_models.ipynb` | **Model Notebook** – EDA, preprocessing, 4 classifiers, metrics, 5-fold CV, hyper-parameter tuning, feature importance, regression |
-| `reports/Evaluation_Report.docx` | **Evaluation Report** – metrics tables, ROC/confusion matrices, tuning, limitations |
-| `reports/Business_Interpretation_Report.docx` | **Business Interpretation Report** – drivers of attrition and HR recommendations |
-| `results/` | metrics CSVs, `summary.json`, figures |
-| `src/attrition_models.py` | the notebook as a plain script |
-| `src/build_reports.py` | regenerates both reports from `results/` |
-| `src/generate_synthetic_data.py` | creates the stand-in dataset (same schema as IBM file) |
-| `data/` | dataset (see below) |
+---
 
-## Models and metrics
-Logistic Regression, Decision Tree, Random Forest, XGBoost – evaluated with Accuracy, Precision, Recall, F1, ROC-AUC.
-Improvements: RandomizedSearchCV hyper-parameter tuning, stratified 5-fold cross-validation, permutation / tree / coefficient feature importance.
+## Project Overview
 
-## Dataset  (important)
-The notebook uses the **real IBM file** if you place it at `data/WA_Fn-UseC_-HR-Employee-Attrition.csv`
-([Kaggle: IBM HR Analytics Employee Attrition & Performance](https://www.kaggle.com/datasets/pavansubhasht/ibm-hr-analytics-attrition-dataset)).
-If it is missing, it falls back to `data/synthetic_hr_attrition.csv` (synthetic, identical columns).
-The numbers committed in `results/` and `reports/` were produced on the synthetic file with a fallback gradient-boosting model
-in place of XGBoost, because the build environment had no internet. **Re-run with the real file and xgboost installed to get final numbers.**
+Employee turnover carries high recruiting, onboarding, and productivity costs. Because attrition affects a minority of the workforce (~16%), naive accuracy metrics obscure real retention risk. This repository addresses the problem through:
 
-## Run
+1. **Attrition Risk Classification** — Comparing four algorithms (**Logistic Regression**, **Decision Tree**, **Random Forest**, and **XGBoost**) using imbalance-aware training, stratified cross-validation, and ROC-AUC-driven hyperparameter search.
+2. **Model Explainability** — Extracting raw-feature permutation importance, impurity-based tree rankings, and standardized linear coefficients to isolate actionable attrition drivers.
+3. **Job Satisfaction Regression (Optional Task)** — Testing whether administrative HR attributes can predict employee `JobSatisfaction` (1–4 scale) using Linear Regression and Random Forest Regression.
+4. **Automated Reporting** — Exporting metrics, charts, and a structured `summary.json` into two formatted Word deliverables (`Evaluation_Report.docx` and `Business_Interpretation_Report.docx`).
+
+---
+
+## Pipeline Architecture
+
+Every modeling step is encapsulated inside `scikit-learn` `Pipeline` and `ColumnTransformer` objects (`src/attrition_models.py` and `notebooks/employee_attrition_models.ipynb`) to prevent test-set data leakage:
+
+1. **Ingestion & Schema Hygiene**
+   - Drops non-predictive constant and identifier fields (`EmployeeCount`, `Over18`, `StandardHours`, `EmployeeNumber`).
+   - Encodes `Attrition` as binary (`Yes` → `1`, `No` → `0`).
+2. **Stratified Splitting & Preprocessing**
+   - Uses a stratified 80/20 train/test split (`random_state=42`) across the 30 remaining predictor features.
+   - Applies `StandardScaler` to numerical columns and `OneHotEncoder(handle_unknown="ignore")` to categorical columns.
+   - Compensates for class imbalance using `class_weight="balanced"` (or `scale_pos_weight` for `XGBClassifier`).
+3. **Validation & Hyperparameter Tuning**
+   - Evaluates baselines with 5-fold `StratifiedKFold` cross-validation on Accuracy, Precision, Recall, F1, and ROC-AUC.
+   - Runs `RandomizedSearchCV` (20 iterations, 5-fold CV, optimizing `roc_auc`) per classifier before scoring once on the held-out 20% test set.
+4. **Optional Regression Benchmark**
+   - Trains `LinearRegression` and `RandomForestRegressor` on an 80/20 split to predict `JobSatisfaction` against a mean-prediction baseline (`MAE`, `RMSE`, `R²`).
+
+---
+
+## Dataset Configuration & Current Artifacts
+
+By default, the pipeline checks for the authentic Kaggle dataset at:
+
+```text
+data/WA_Fn-UseC_-HR-Employee-Attrition.csv
+```
+
+- **Real Dataset**: Available from [Kaggle – IBM HR Analytics Employee Attrition & Performance](https://www.kaggle.com/datasets/pavansubhasht/ibm-hr-analytics-attrition-dataset).
+- **Synthetic Fallback**: If the Kaggle CSV is absent, the pipeline automatically loads `data/synthetic_hr_attrition.csv` (1,470 rows, identical 35-column schema, ~15.7% attrition rate), generated by `src/generate_synthetic_data.py`.
+- **XGBoost Fallback**: If the `xgboost` package is unavailable in the runtime environment, the pipeline substitutes `sklearn.ensemble.HistGradientBoostingClassifier` so execution succeeds without external dependencies.
+
+> **Note on Committed Results:** All metrics, figures, and `.docx` reports currently checked into `results/` and `reports/` were generated using the synthetic stand-in dataset (`1,470` rows, `15.7%` attrition) and the `HistGradientBoostingClassifier` fallback (`xgboost_real: false`). Place the real CSV in `data/` with `xgboost` installed and re-run the pipeline to refresh all outputs.
+
+---
+
+## Committed Benchmark Snapshot
+
+### Tuned Classifier Performance (Held-Out Test Set, Synthetic Data)
+
+| Model | Accuracy | Precision | Recall | F1 | Test ROC-AUC | Best 5-Fold CV ROC-AUC |
+|---|---:|---:|---:|---:|---:|---:|
+| **Logistic Regression** | 0.745 | 0.325 | 0.587 | 0.419 | **0.776** | **0.817** |
+| **Random Forest** | 0.786 | 0.369 | 0.522 | **0.432** | 0.764 | 0.795 |
+| **XGBoost *(HistGradientBoosting fallback)*** | 0.748 | 0.325 | 0.565 | 0.413 | 0.754 | 0.804 |
+| **Decision Tree** | 0.684 | 0.272 | **0.609** | 0.376 | 0.688 | 0.724 |
+
+### Key Attrition Signals Observed
+
+- **Overtime Impact**: Employees working overtime exhibit a **29.4%** attrition rate compared to **10.5%** for those without overtime.
+- **Top Permutation Importance Drivers (Logistic Regression)**: `MonthlyIncome` (`0.1543`), `OverTime` (`0.0566`), `JobSatisfaction` (`0.0198`), `YearsWithCurrManager` (`0.0185`), `Age` (`0.0163`), and `StockOptionLevel` (`0.0120`).
+- **Direction of Risk (Standardized LR Coefficients)**:
+  - *Increases risk*: `OverTime_Yes` (`+0.821`), `BusinessTravel_Travel_Frequently` (`+0.686`), `MaritalStatus_Single` (`+0.662`), `JobRole_Sales Representative` (`+0.492`).
+  - *Reduces risk*: Higher `MonthlyIncome` (`-1.253`), `OverTime_No` (`-0.826`), `BusinessTravel_Non-Travel` (`-0.725`).
+
+### Job Satisfaction Regression (`JobSatisfaction`, Scale 1–4)
+
+| Model | MAE | RMSE | R² |
+|---|---:|---:|---:|
+| **Baseline (Predict Mean)** | 0.920 | 1.066 | 0.000 |
+| **Random Forest Regressor** | 0.936 | 1.096 | -0.057 |
+| **Linear Regression** | 0.939 | 1.104 | -0.072 |
+
+Both regressors fail to outperform the mean baseline, indicating that routine HR metadata alone does not explain self-reported satisfaction and should be supplemented with direct employee engagement surveys.
+
+---
+
+## Repository Structure
+
+```text
+.
+├── data/
+│   └── synthetic_hr_attrition.csv         # 1,470-row synthetic IBM-schema fallback dataset
+├── notebooks/
+│   └── employee_attrition_models.ipynb    # Interactive notebook for EDA, modeling, tuning, & export
+├── reports/
+│   ├── Evaluation_Report.docx             # Technical report: metrics, CV, tuning, limitations
+│   └── Business_Interpretation_Report.docx# Executive HR summary: drivers, usage guidelines, actions
+├── results/
+│   ├── figures/
+│   │   ├── 01_eda_attrition.png           # Class balance & attrition by OverTime / JobRole
+│   │   ├── 02_correlation.png             # Numeric feature correlations with Attrition
+│   │   ├── 03_roc_and_tuning.png          # Tuned ROC curves & baseline vs. tuned ROC-AUC
+│   │   ├── 04_confusion_matrices.png      # Test-set confusion matrices for all 4 classifiers
+│   │   ├── 05_permutation_importance.png  # Top raw features by ROC-AUC permutation drop
+│   │   └── 06_rf_and_lr_importance.png    # RF impurity importance & LR standardized coefficients
+│   ├── baseline_metrics.csv               # Untuned classifier scores on test set
+│   ├── cv_metrics.csv                     # 5-fold stratified CV mean ± std scores
+│   ├── tuned_metrics.csv                  # Tuned classifier scores + best CV ROC-AUC
+│   ├── permutation_importance.csv         # Full permutation importance ranking
+│   ├── regression_metrics.csv             # JobSatisfaction regression benchmark
+│   └── summary.json                       # Serialized run metadata & top drivers for report generation
+├── src/
+│   ├── attrition_models.py                # Standalone Python equivalent of the notebook pipeline
+│   ├── build_reports.py                   # Generates both .docx reports from results/
+│   └── generate_synthetic_data.py         # Reproduces data/synthetic_hr_attrition.csv
+├── requirements.txt                       # Core Python dependencies
+└── README.md
+```
+
+---
+
+## Getting Started
+
+### 1. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
-# (optional) put the real CSV in data/
-jupyter nbconvert --to notebook --execute --inplace notebooks/employee_attrition_models.ipynb   # or open it and Run All
-python src/build_reports.py      # refresh the .docx reports with the new numbers
+```
+
+Core packages required (`requirements.txt`): `numpy>=1.24`, `pandas>=2.0`, `scikit-learn>=1.3`, `xgboost>=2.0`, `matplotlib>=3.7`, `jupyter`, and `python-docx>=1.1`.
+
+### 2. Provide the Dataset (Optional)
+
+Download `WA_Fn-UseC_-HR-Employee-Attrition.csv` from Kaggle and place it inside `data/` to run against the authentic IBM dataset. To regenerate the synthetic fallback file manually:
+
+```bash
+python src/generate_synthetic_data.py
+```
+
+### 3. Run the Modeling Pipeline
+
+Execute via Jupyter Notebook:
+
+```bash
+jupyter nbconvert --to notebook --execute --inplace notebooks/employee_attrition_models.ipynb
+```
+
+Or run the standalone script directly (set `HEADLESS=1` on Linux/macOS or `$env:HEADLESS="1"` in PowerShell to render plots without GUI windows):
+
+```bash
+python src/attrition_models.py
+```
+
+### 4. Rebuild Word Reports
+
+After running the notebook or `src/attrition_models.py`, regenerate the `.docx` deliverables from the updated `results/` directory:
+
+```bash
+python src/build_reports.py
 ```
